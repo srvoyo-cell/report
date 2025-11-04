@@ -1,0 +1,26 @@
+import logging
+from reportai_class import ReportAI
+
+
+if __name__ == '__main__':
+
+    # ==========================================================
+    # НАСТРОЙКА ЛОГИРОВАНИЯ
+    # ==========================================================
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)-8s | %(message)s",
+        datefmt="%H:%M:%S"
+    )
+
+    report = ReportAI(
+        model='Qwen/Qwen3-VL-235B-A22B-Instruct',
+        token='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',
+        platform='Hugging_face',
+        base_dir='for_reports',
+        output_dir='for_reports/output',
+        cls_dir='for_reports/template_cls/university-report.cls'
+    )
+    
+    report.make_tex()
+
