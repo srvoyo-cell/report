@@ -5,6 +5,7 @@ __pycache__/
 
 # Виртуальные окружения
 .venv/
+.env/
 env/
 venv/
 
@@ -15,3 +16,6 @@ venv/
 # Системные файлы
 .DS_Store
 Thumbs.db
+
+# Python files
+test.py

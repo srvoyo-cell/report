@@ -1,9 +1,11 @@
 import logging
+import os
+
+from dotenv import load_dotenv
 from reportai_class import ReportAI
 
 
 if __name__ == '__main__':
-
     # ==========================================================
     # НАСТРОЙКА ЛОГИРОВАНИЯ
     # ==========================================================
@@ -13,10 +15,11 @@ if __name__ == '__main__':
         datefmt="%H:%M:%S"
     )
 
+    load_dotenv()
+
     report = ReportAI(
         model='Qwen/Qwen3-VL-235B-A22B-Instruct',
-        token='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',
-        platform='Hugging_face',
+        token=os.getenv('HF_TOKEN'),
         base_dir='for_reports',
         output_dir='for_reports/output',
         cls_dir='for_reports/template_cls/university-report.cls'
