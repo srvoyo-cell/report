@@ -78,3 +78,21 @@ def build_progress_prompt(theory_fixed: str, code_complete: str) -> str:
         code_complete=code_complete
     )
     return rendered
+
+
+def make_latex_template(report_section: str) -> str:
+    LATEX_TEMPLATE = r"""
+\documentclass{university-report}
+\usepackage{pdfpages}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+
+\begin{document}
+
+\structsection{Ход работы}
+{{ report_sections }}
+
+\end{document}
+"""
+    rendered = Template(LATEX_TEMPLATE).render(report_sections=report_section)
+    return rendered

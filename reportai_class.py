@@ -15,7 +15,6 @@ import httpx
 from typing import Optional
 from jinja2 import Template
 from help_functions import log_method
-from tools import plot_functions
 
 
 # ==========================================================
@@ -42,7 +41,6 @@ class ReportAI:
         self.code_complete: str = ""
         self.theory_fixed: str = ""
         self.report_sections: str = ""
-        self.tools = plot_functions
 
     # ------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -122,7 +120,7 @@ class ReportAI:
     # ------------------------------------------------------------
 
     @log_method
-    def __stream_chat_completion(self, prompt: str, create_response=False, tools=None, tool_choice=None) -> str:
+    def __stream_chat_completion(self, prompt: str) -> str:
         """Выполняет потоковый вызов LLM с постепенным чтением вывода."""
         logging.info("Начинается потоковая генерация...")
 
@@ -133,11 +131,6 @@ class ReportAI:
             stream=True,
             temperature=0,
         )
-
-        # Добавляем только если реально заданы
-        if tools is not None and tool_choice is not None:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = tool_choice
 
         stream = self.client.responses.create(**kwargs)
 
@@ -155,8 +148,6 @@ class ReportAI:
             logging.warning("⚠️ Модель не вернула текст. Проверь лог или соединение.")
             final_text = "[ОШИБКА: пустой ответ от модели]"
 
-        if create_response:
-            self.response = stream
 
         print("Ответ:", final_text)
         logging.info("✅ Потоковая генерация завершена.")
@@ -178,7 +169,7 @@ class ReportAI:
         logging.info("Этап 2 — генерация раздела 'Ход работы'...")
         progress_prompt = ts.build_progress_prompt(self.theory_fixed, self.code_complete)
 
-        raw_report = self.__stream_chat_completion(progress_prompt, tool_choice='auto', tools=self.tools, create_response=True)
+        raw_report = self.__stream_chat_completion(progress_prompt)
 
         self.report_sections = self.__extract_latex_body(self.__clean_llm_output(raw_report))
         logging.info("✅ Разделы отчёта успешно сгенерированы.")
@@ -192,30 +183,13 @@ class ReportAI:
         """Создаёт и сохраняет LaTeX-файл отчёта."""
         self.__make_report()
 
-        LATEX_TEMPLATE = r"""
-\documentclass{university-report}
-\usepackage{pdfpages}
-\usepackage{fontspec}
-\setmainfont{Times New Roman}
+        tex_template = ts.make_latex_template(self.report_sections)
 
-\begin{document}
-
-\structsection{Теоретическая часть}
-{{ theory_fixed }}
-
-\structsection{Ход работы}
-{{ report_sections }}
-
-\end{document}
-"""
         os.makedirs(self.output_dir, exist_ok=True)
         tex_path = os.path.join(self.output_dir, "report.tex")
 
         with open(tex_path, "w", encoding="utf-8") as f:
-            f.write(Template(LATEX_TEMPLATE).render(
-                theory_fixed=self.theory_fixed,
-                report_sections=self.report_sections
-            ))
+            f.write(tex_template)
 
         logging.info(f"✅ LaTeX-файл сохранён: {tex_path}")
         return tex_path
