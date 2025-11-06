@@ -22,8 +22,7 @@ if __name__ == '__main__':
         token=os.getenv('HF_TOKEN'),
         base_dir='for_reports',
         output_dir='for_reports/output',
-        cls_dir='for_reports/template_cls/university-report.cls'
     )
     
-    report.make_tex()
+    report.make_docx()
 
