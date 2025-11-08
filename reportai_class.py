@@ -10,6 +10,7 @@ import subprocess
 import templates as ts
 import httpx
 import json
+import time
 
 from typing import Optional
 from help_functions import log_method
@@ -112,19 +113,26 @@ class ReportAI:
 
         logging.info("Этап 2 — генерация раздела 'Ход работы'...")
         progress_prompt = ts.build_progress_prompt(self.theory_fixed, self.code_complete)
-        self.report_sections = self._stream_chat_completion(progress_prompt)
+        response_text = self._stream_chat_completion(progress_prompt)
+
+        if '♣' in response_text:
+            self.report_sections, self.json_resp = response_text.split('♣')
+        else:
+            logging.warning("⚠️ Символ '♣' не найден, весь текст сохранён как отчёт.")
+            self.json_resp = "{}"
+            self.report_sections = response_text
 
         logging.info("✅ Разделы отчёта успешно сгенерированы.")
 
+
     @log_method
-    def _make_code_response(self, text: str) -> str:
+    def _make_code_response(self) -> str:
         """Сохраняет код для построения графиков в txt-файл."""
         os.makedirs(self.output_dir, exist_ok=True)
-        txt_resp = text.split('♣')[-1]
         self.resp_path = os.path.join(self.output_dir, 'resp.txt')
 
         with open(self.resp_path, 'w', encoding='utf-8') as f:
-            f.write(txt_resp)
+            f.write(self.json_resp)
 
         logging.info(f"✅ Txt-файл сохранён: {self.resp_path}")
         return self.resp_path
@@ -138,14 +146,21 @@ class ReportAI:
             raise FileNotFoundError(f"Код для графиков не найден: {script_path}")
 
         with open(script_path, 'r', encoding='utf-8') as file:
-            code = json.load(file)['ready_to_use_code']
+            try:
+                data = json.load(file)
+            except json.JSONDecodeError:
+                logging.error("resp.txt не содержит корректный JSON.")
+                raise
+        code = data.get("ready_to_use_code") or data.get("graphics", {}).get("ready_to_use_code")
+        if not code:
+            raise KeyError("В JSON нет ключа 'ready_to_use_code'.")
 
         try:
-            os.chdir('/for_reports/output')
             proc = subprocess.run(
-                ["python", '-c', code],
+                ["python", "-c", code],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                cwd=self.output_dir,
                 text=True,
                 timeout=300
             )
@@ -156,6 +171,7 @@ class ReportAI:
         except subprocess.TimeoutExpired:
             logging.error("Время выполнения скрипта для графиков превысило лимит.")
             raise
+
     # ------------------------------------------------------------
     # СОХРАНЕНИЕ И КОНВЕРТАЦИЯ
     # ------------------------------------------------------------
@@ -171,57 +187,69 @@ class ReportAI:
         with open(self.md_path, "w", encoding="utf-8") as f:
             f.write(self.report_sections)
 
+        if os.path.exists(os.path.join(self.output_dir, 'resp.txt')):
+          self._create_graphics()
+
         logging.info(f"✅ Markdown-файл сохранён: {self.md_path}")
         return self.md_path
 
 
     @log_method
-    def make_docx(self, reference_doc: Optional[str] = None, highlight_style: str = 'haddock') -> str:
-        """Создаёт DOCX-файл отчёта, используя pypandoc."""
-        os.makedirs(self.output_dir, exist_ok=True)
+    def make_docx(self, reference_doc):
+        """Создаёт DOCX из готового Markdown-файла или с нуля, если нужно."""
+        logging.info("▶️ Запуск создания DOCX-отчёта")
 
-        if not hasattr(self, "md_path") or not self.md_path:
-            self.md_path = os.path.join(self.output_dir, "report.md")
-
-        if os.path.exists(self.md_path):
+        # --- Проверяем существование Markdown ---
+        md_path = getattr(self, "md_path", os.path.join(self.output_dir, "report.md"))
+        if os.path.exists(md_path):
+            self.md_path = md_path
             logging.info(f"🟡 Обнаружен существующий Markdown-файл: {self.md_path}. Пропускаем генерацию.")
         else:
-            logging.info("Markdown-файл не найден. Генерация нового отчёта...")
             self.make_md()
 
-        # Создание графиков, если код есть
-        logging.info("Создание графиков для отчёта...")
+        resp_path = os.path.join(self.output_dir, 'resp.txt')
+
+        # --- Пытаемся создать или использовать код для графиков ---
         try:
-            if self.report_sections :
-                self._make_code_response(self.report_sections)
+            if getattr(self, "report_sections", ""):
+                self._make_code_response()
                 self._create_graphics()
-            elif os.path.exists('for_reports/output/resp.txt'):
-                self._create_graphics()
+            elif os.path.exists(resp_path):
+                logging.info(f"Найден существующий resp.txt: {resp_path}")
+                try:
+                    with open(resp_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if ("ready_to_use_code" in data) or (
+                        isinstance(data, dict)
+                        and "graphics" in data
+                        and isinstance(data["graphics"], dict)
+                        and "ready_to_use_code" in data["graphics"]
+                    ):
+                        self.resp_path = resp_path
+                        self._create_graphics()
+                    else:
+                        logging.info("resp.txt найден, но не содержит кода для графиков — пропускаем создание графиков.")
+                except json.JSONDecodeError:
+                    logging.warning("resp.txt найден, но не является корректным JSON. Пропускаем создание графиков.")
             else:
-                logging.info("Код для графиков не найден в report_sections — пропускаем создание графиков.")
+                logging.info("Код для графиков не найден — пропускаем создание графиков.")
         except Exception as e:
             logging.error(f"Ошибка при создании графиков: {e}")
 
-        # Конвертация markdown → docx
-        docx_path = self.md_path.replace(".md", ".docx")
-        extra_args = [
-            f"--highlight-style={highlight_style}",
-            "--standalone"
-        ]
-        if reference_doc:
-            extra_args.append(f'--reference-doc={reference_doc}')
-
+        # --- Преобразуем Markdown → DOCX ---
         try:
-            pypandoc.convert_text(
-                open(self.md_path, 'r', encoding='utf-8').read(),
-                'docx',
-                format='md',
-                outputfile=docx_path,
-                extra_args=extra_args
-            )
-            logging.info(f"✅ DOCX успешно создан: {docx_path}")
+          time.sleep(5)
+          docx_path = os.path.join(self.output_dir, "report.docx")
+          pypandoc.convert_file(
+              self.md_path,
+              to="docx",
+              outputfile=docx_path,
+              extra_args=[
+                f"--reference-doc={reference_doc}",
+                f"--resource-path={self.output_dir}"
+              ]
+          )
+          logging.info(f"✅ DOCX-отчёт успешно создан: {docx_path}")
         except Exception as e:
-            logging.error(f"Ошибка при конвертации Markdown → DOCX: {e}")
-            raise
+            logging.error(f"❌ Ошибка при конвертации DOCX: {e}")
 
-        return docx_path
